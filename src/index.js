@@ -1,35 +1,45 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const admin = require('firebase-admin');
 
 const app = express();
 
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  }),
+// CORS manuel — garantit que les headers sont toujours présents, même en cas d'erreur 500
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(s => s.trim());
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
+  if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
 });
 
-const db = admin.firestore();
-
-const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(s => s.trim())
-  : ['http://localhost:5173'];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-}));
 app.use(express.json());
+
+// Firebase — la clé privée peut contenir des \n littéraux selon la plateforme de déploiement
+const rawKey = process.env.FIREBASE_PRIVATE_KEY || '';
+const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      privateKey,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    }),
+  });
+} catch (e) {
+  console.error('Firebase init error:', e.message);
+}
+
+const db = admin.firestore();
 
 app.get('/health', (_, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
