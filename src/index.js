@@ -1,6 +1,72 @@
 require('dotenv').config();
 const express = require('express');
 const admin = require('firebase-admin');
+const nodemailer = require('nodemailer');
+
+// Transporteur Gmail — actif uniquement si les variables sont configurées
+const mailer = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    })
+  : null;
+
+const sendOrderNotification = async (order) => {
+  if (!mailer) return;
+  const date = new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Abidjan' });
+  await mailer.sendMail({
+    from: `"Gourmandises Africaines" <${process.env.GMAIL_USER}>`,
+    to: process.env.NOTIFY_EMAIL || process.env.GMAIL_USER,
+    subject: `🍽️ Nouvelle demande — ${order.itemName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+        <div style="background: #2D6E2D; padding: 24px; text-align: center;">
+          <p style="color: #F2C94C; font-size: 28px; margin: 0; font-weight: bold;">Gourmandises</p>
+          <p style="color: #fff; letter-spacing: 6px; font-size: 13px; margin: 4px 0 0;">AFRICAINES</p>
+        </div>
+        <div style="padding: 28px 32px;">
+          <h2 style="color: #1f2937; margin-top: 0;">Nouvelle demande de commande</h2>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280; width: 40%;">Plat commandé</td>
+              <td style="padding: 10px 0; font-weight: bold; color: #2D6E2D;">${order.itemName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Prénom</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.name}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Nom</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.lastName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Localisation</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.location}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">WhatsApp</td>
+              <td style="padding: 10px 0;">
+                <a href="https://wa.me/${order.whatsapp.replace(/\D/g, '')}" style="color: #25D366; font-weight: bold; text-decoration: none;">
+                  ${order.whatsapp}
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; color: #6b7280;">Date</td>
+              <td style="padding: 10px 0; color: #9ca3af; font-size: 13px;">${date}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="background: #f9fafb; padding: 16px 32px; text-align: center; font-size: 12px; color: #9ca3af;">
+          Gourmandises Africaines — notification automatique
+        </div>
+      </div>
+    `,
+  });
+};
 
 const app = express();
 
@@ -64,6 +130,12 @@ app.post('/api/orders', async (req, res) => {
     };
 
     const docRef = await db.collection('orders').add(order);
+
+    // Email en arrière-plan — un échec n'empêche pas la confirmation au client
+    sendOrderNotification(order).catch(err =>
+      console.error('Email notification error:', err.message)
+    );
+
     res.status(201).json({ success: true, id: docRef.id });
   } catch (error) {
     console.error('POST /api/orders error:', error);
