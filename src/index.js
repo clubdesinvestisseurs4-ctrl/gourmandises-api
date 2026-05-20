@@ -22,9 +22,12 @@ try {
   console.error('Firebase init error:', e.message);
 }
 
-// Nodemailer — Gmail avec mot de passe d'application
+// Nodemailer — Gmail SMTP forcé en IPv4 (Render bloque IPv6 et le port 465)
 const gmailTransporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // STARTTLS
+  family: 4,     // Force IPv4
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
@@ -91,24 +94,31 @@ const sendOrderNotification = async (order) => {
   });
 };
 
+const cors = require('cors');
 const app = express();
 
-// CORS manuel — garantit que les headers sont toujours présents, même en cas d'erreur 500
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
-  .split(',')
-  .map(s => s.trim());
+const allowedOrigins = [
+  'https://cookafrica.vercel.app',
+  ...(process.env.FRONTEND_URL || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean),
+  'http://localhost:5173',
+];
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '';
-  if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
+app.use(cors({
+  origin: (origin, callback) => {
+    // Autoriser les requêtes sans origin (ex: Postman, server-to-server)
+    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS bloqué pour l'origine : ${origin}`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+}));
 
 app.use(express.json());
 
