@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const admin = require('firebase-admin');
+const nodemailer = require('nodemailer');
 
 // Firebase — la clé privée peut contenir des \n littéraux selon la plateforme de déploiement
 const rawKey = process.env.FIREBASE_PRIVATE_KEY || '';
 const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
 
+let db;
 try {
   admin.initializeApp({
     credential: admin.credential.cert({
@@ -14,72 +16,78 @@ try {
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     }),
   });
+  db = admin.firestore();
+  console.log('Firebase initialisé avec succès.');
 } catch (e) {
   console.error('Firebase init error:', e.message);
 }
 
-const db = admin.firestore();
+// Nodemailer — Gmail avec mot de passe d'application
+const gmailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
 
-// Écrit dans la collection 'mail' — l'extension Firebase "Trigger Email" envoie l'email
-// depuis les serveurs Google (contourne les restrictions SMTP de Render)
 const sendOrderNotification = async (order) => {
   const notifyEmail = process.env.NOTIFY_EMAIL;
-  if (!notifyEmail) return;
+  if (!notifyEmail || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
 
   const date = new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Abidjan' });
 
-  await db.collection('mail').add({
+  await gmailTransporter.sendMail({
+    from: `"CookAfrica" <${process.env.GMAIL_USER}>`,
     to: notifyEmail,
-    message: {
-      subject: `🍽️ Nouvelle demande — ${order.itemName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background: #8B1E1E; padding: 4px 0; background-image: repeating-linear-gradient(90deg, #D4AF37 0px, #D4AF37 20px, #8B1E1E 20px, #8B1E1E 40px);"></div>
-          <div style="background: #8B1E1E; padding: 24px; text-align: center;">
-            <p style="color: #D4AF37; font-size: 32px; margin: 0; font-weight: 800; letter-spacing: 2px;">COOK</p>
-            <p style="color: #F5F5F5; font-size: 22px; margin: 0; font-weight: 800; letter-spacing: 8px;">AFRICA</p>
-            <p style="color: #D4AF37; font-size: 11px; margin: 8px 0 0; letter-spacing: 4px; text-transform: uppercase;">Le Restaurant qui Rassemble</p>
-          </div>
-          <div style="background: #8B1E1E; padding: 4px 0; background-image: repeating-linear-gradient(90deg, #D4AF37 0px, #D4AF37 20px, #8B1E1E 20px, #8B1E1E 40px);"></div>
-          <div style="padding: 28px 32px;">
-            <h2 style="color: #1f2937; margin-top: 0;">Nouvelle demande de commande</h2>
-            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-              <tr style="border-bottom: 1px solid #f3f4f6;">
-                <td style="padding: 10px 0; color: #6b7280; width: 40%;">Plat commandé</td>
-                <td style="padding: 10px 0; font-weight: bold; color: #8B1E1E;">${order.itemName}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #f3f4f6;">
-                <td style="padding: 10px 0; color: #6b7280;">Prénom</td>
-                <td style="padding: 10px 0; color: #1f2937;">${order.name}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #f3f4f6;">
-                <td style="padding: 10px 0; color: #6b7280;">Nom</td>
-                <td style="padding: 10px 0; color: #1f2937;">${order.lastName}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #f3f4f6;">
-                <td style="padding: 10px 0; color: #6b7280;">Localisation</td>
-                <td style="padding: 10px 0; color: #1f2937;">${order.location}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #f3f4f6;">
-                <td style="padding: 10px 0; color: #6b7280;">WhatsApp</td>
-                <td style="padding: 10px 0;">
-                  <a href="https://wa.me/${order.whatsapp.replace(/\D/g, '')}" style="color: #25D366; font-weight: bold; text-decoration: none;">
-                    ${order.whatsapp}
-                  </a>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 10px 0; color: #6b7280;">Date</td>
-                <td style="padding: 10px 0; color: #9ca3af; font-size: 13px;">${date}</td>
-              </tr>
-            </table>
-          </div>
-          <div style="background: #1A1A1A; padding: 16px 32px; text-align: center; font-size: 12px; color: #D4AF37;">
-            CookAfrica — notification automatique &nbsp;•&nbsp; contact@cookafrica.com
-          </div>
+    subject: `Nouvelle demande — ${order.itemName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+        <div style="background: #8B1E1E; padding: 4px 0; background-image: repeating-linear-gradient(90deg, #D4AF37 0px, #D4AF37 20px, #8B1E1E 20px, #8B1E1E 40px);"></div>
+        <div style="background: #8B1E1E; padding: 24px; text-align: center;">
+          <p style="color: #D4AF37; font-size: 32px; margin: 0; font-weight: 800; letter-spacing: 2px;">COOK</p>
+          <p style="color: #F5F5F5; font-size: 22px; margin: 0; font-weight: 800; letter-spacing: 8px;">AFRICA</p>
+          <p style="color: #D4AF37; font-size: 11px; margin: 8px 0 0; letter-spacing: 4px; text-transform: uppercase;">Le Restaurant qui Rassemble</p>
         </div>
-      `,
-    },
+        <div style="background: #8B1E1E; padding: 4px 0; background-image: repeating-linear-gradient(90deg, #D4AF37 0px, #D4AF37 20px, #8B1E1E 20px, #8B1E1E 40px);"></div>
+        <div style="padding: 28px 32px;">
+          <h2 style="color: #1f2937; margin-top: 0;">Nouvelle demande de commande</h2>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280; width: 40%;">Plat commandé</td>
+              <td style="padding: 10px 0; font-weight: bold; color: #8B1E1E;">${order.itemName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Prénom</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.name}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Nom</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.lastName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">Localisation</td>
+              <td style="padding: 10px 0; color: #1f2937;">${order.location}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f3f4f6;">
+              <td style="padding: 10px 0; color: #6b7280;">WhatsApp</td>
+              <td style="padding: 10px 0;">
+                <a href="https://wa.me/${order.whatsapp.replace(/\D/g, '')}" style="color: #25D366; font-weight: bold; text-decoration: none;">
+                  ${order.whatsapp}
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; color: #6b7280;">Date</td>
+              <td style="padding: 10px 0; color: #9ca3af; font-size: 13px;">${date}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="background: #1A1A1A; padding: 16px 32px; text-align: center; font-size: 12px; color: #D4AF37;">
+          CookAfrica — notification automatique &nbsp;•&nbsp; contact@cookafrica.com
+        </div>
+      </div>
+    `,
   });
 };
 
@@ -109,6 +117,10 @@ app.get('/health', (_, res) => {
 });
 
 app.post('/api/orders', async (req, res) => {
+  if (!db) {
+    return res.status(503).json({ error: 'Base de données non disponible.' });
+  }
+
   try {
     const { itemId, itemName, name, lastName, location, whatsapp } = req.body;
 
@@ -128,9 +140,9 @@ app.post('/api/orders', async (req, res) => {
 
     const docRef = await db.collection('orders').add(order);
 
-    // Email en arrière-plan via l'extension Firebase "Trigger Email"
+    // Email en arrière-plan via Gmail
     sendOrderNotification(order).catch(err =>
-      console.error('[EMAIL] Échec écriture Firestore mail:', err.message)
+      console.error('[EMAIL] Échec envoi Gmail:', err.message)
     );
 
     res.status(201).json({ success: true, id: docRef.id });
@@ -141,6 +153,10 @@ app.post('/api/orders', async (req, res) => {
 });
 
 app.get('/api/stats', async (req, res) => {
+  if (!db) {
+    return res.status(503).json({ error: 'Base de données non disponible.' });
+  }
+
   try {
     const snapshot = await db.collection('orders').orderBy('createdAt', 'desc').get();
 
