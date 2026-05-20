@@ -31,7 +31,7 @@ const sendOrderNotification = async (order) => {
 
   const date = new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Abidjan' });
 
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: 'CookAfrica <onboarding@resend.dev>',
     to: notifyEmail,
     subject: `Nouvelle demande — ${order.itemName}`,
@@ -83,6 +83,10 @@ const sendOrderNotification = async (order) => {
       </div>
     `,
   });
+  if (result.error) {
+    throw new Error(JSON.stringify(result.error));
+  }
+  console.log('[EMAIL] Envoyé avec succès à', notifyEmail, '— id:', result.data?.id);
 };
 
 const cors = require('cors');
