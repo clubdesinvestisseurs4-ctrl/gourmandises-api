@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const admin = require('firebase-admin');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 // Firebase — la clé privée peut contenir des \n littéraux selon la plateforme de déploiement
 const rawKey = process.env.FIREBASE_PRIVATE_KEY || '';
@@ -22,26 +22,17 @@ try {
   console.error('Firebase init error:', e.message);
 }
 
-// Nodemailer — Gmail SMTP forcé en IPv4 (Render bloque IPv6 et le port 465)
-const gmailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // STARTTLS
-  family: 4,     // Force IPv4
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+// Resend — envoi via HTTPS (Render bloque SMTP, pas HTTP)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendOrderNotification = async (order) => {
   const notifyEmail = process.env.NOTIFY_EMAIL;
-  if (!notifyEmail || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
+  if (!notifyEmail || !process.env.RESEND_API_KEY) return;
 
   const date = new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Abidjan' });
 
-  await gmailTransporter.sendMail({
-    from: `"CookAfrica" <${process.env.GMAIL_USER}>`,
+  await resend.emails.send({
+    from: 'CookAfrica <onboarding@resend.dev>',
     to: notifyEmail,
     subject: `Nouvelle demande — ${order.itemName}`,
     html: `
@@ -150,9 +141,8 @@ app.post('/api/orders', async (req, res) => {
 
     const docRef = await db.collection('orders').add(order);
 
-    // Email en arrière-plan via Gmail
     sendOrderNotification(order).catch(err =>
-      console.error('[EMAIL] Échec envoi Gmail:', err.message)
+      console.error('[EMAIL] Échec envoi Resend:', err.message)
     );
 
     res.status(201).json({ success: true, id: docRef.id });
